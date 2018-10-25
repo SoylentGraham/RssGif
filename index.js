@@ -1,5 +1,5 @@
 var GifEncoder = require('./GifEncoder.js');
-var Http = require('http');
+var http = require('http');
 
 let Palette = [ 0,255,255,	0,0,0,	255,0,0,	0,255,0,	255,255,0,	0,0,255,	255,0,255,	0,255,255,	255,255,255 ];
 let Colours = [ 
@@ -17,10 +17,66 @@ let Colours = [
 	1,1,1,	1,1,1,	3,3,3,	3,3,3,
 ];
 
+
+function httpRequest(params, postData) 
+{
+    return new Promise(function(resolve, reject) {
+        var req = http.request(params, function(res) {
+            // reject on bad status
+            if (res.statusCode < 200 || res.statusCode >= 300) {
+                return reject(new Error('statusCode=' + res.statusCode));
+            }
+            // cumulate data
+            var body = [];
+            res.on('data', function(chunk) {
+                body.push(chunk);
+            });
+            // resolve on end
+            res.on('end', function() {
+                resolve(body);
+            });
+        });
+        // reject on request error
+        req.on('error', function(err) {
+            // This is not a "Second reject", just a different sort of failure
+            reject(err);
+        });
+        if (postData) {
+            req.write(postData);
+        }
+        // IMPORTANT
+        req.end();
+    });
+}
+async function GetImageUrl(RssHost,RssUrl)
+{
+	var params = 
+	{
+	    host: RssHost,
+	    port: 80,
+	    method: 'GET',
+	    path: RssUrl
+	};
+	let ResponseBody = await httpRequest( params );
+
+	ResponseBody = "" + ResponseBody;	
+	//	find the img tag
+	//var paragraph = 'The quick<img src="hello">e lazy dog.<img src="bye"> It barked.';
+	let Img_Regex = /img src=\"([^\"]+)\"/;
+	let Match = ResponseBody.match(Img_Regex);
+	let Url = Match ? Match[1] : undefined;
+	if ( Url === undefined )
+		return null;
+	return Url;
+}
+
 exports.handler = async (event) => 
 {
 	try
 	{
+		let ImageUrl = await GetImageUrl('webcomicname.com','/tagged/oh-no/rss');
+		throw ImageUrl;
+		
 		var GifDataArray = [];
 		
 		//	make a gif!
@@ -87,7 +143,7 @@ exports.handler = async (event) =>
 	{
 		const response = {
 			statusCode: 200,
-			body: "Error: " + Error
+			body: "Error: " + (Error)
 		};
 		return response;
 	}
