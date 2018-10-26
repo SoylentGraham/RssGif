@@ -1,8 +1,13 @@
 var GifEncoder = require('./GifEncoder.js');
 var http = require('http');
+var URL = require('url');
 
-let Palette = [ 0,255,255,	0,0,0,	255,0,0,	0,255,0,	255,255,0,	0,0,255,	255,0,255,	0,255,255,	255,255,255 ];
-let Colours = [ 
+
+
+
+
+let Debug_Palette = [ 0,255,255,	0,0,0,	255,0,0,	0,255,0,	255,255,0,	0,0,255,	255,0,255,	0,255,255,	255,255,255 ];
+let Debug_Colours = [ 
 	2,2,2,	2,2,2,	0,0,0,	0,0,0,
 	2,2,2,	2,2,2,	0,0,0,	0,0,0,
 	2,2,2,	2,2,2,	1,1,1,	1,1,1,
@@ -16,24 +21,39 @@ let Colours = [
 	1,1,1,	1,1,1,	3,3,3,	3,3,3,
 	1,1,1,	1,1,1,	3,3,3,	3,3,3,
 ];
+let Debug_Width = 12;
+let Debug_Height = 12;
 
 
-function httpRequest(params, postData) 
+function httpRequest(Url,params, postData) 
 {
-    return new Promise(function(resolve, reject) {
+	//	split url and path
+	let UrlParts = URL.parse(Url);
+	var params = 
+	{
+	    host: UrlParts.host,
+	    path: UrlParts.path,
+	    port: 80,
+	    method: 'GET',
+	};
+	
+    return new Promise(function(resolve, reject) 
+    {
         var req = http.request(params, function(res) {
             // reject on bad status
             if (res.statusCode < 200 || res.statusCode >= 300) {
                 return reject(new Error('statusCode=' + res.statusCode));
             }
             // cumulate data
-            var body = [];
+            var BodyData = [];
             res.on('data', function(chunk) {
-                body.push(chunk);
+                BodyData.push(chunk);
             });
             // resolve on end
+            var Response = res;
             res.on('end', function() {
-                resolve(body);
+            	Response.body = BodyData;
+                resolve(Response);
             });
         });
         // reject on request error
@@ -48,81 +68,98 @@ function httpRequest(params, postData)
         req.end();
     });
 }
-async function GetImageUrl(RssHost,RssUrl)
+async function GetFirstImgSrcUrl(Url)
 {
-	var params = 
-	{
-	    host: RssHost,
-	    port: 80,
-	    method: 'GET',
-	    path: RssUrl
-	};
-	let ResponseBody = await httpRequest( params );
+	let Response = await httpRequest( Url );
 
-	ResponseBody = "" + ResponseBody;	
+	//	make it a string
+	let ResponseBody = "" + Response.body;	
 	//	find the img tag
 	//var paragraph = 'The quick<img src="hello">e lazy dog.<img src="bye"> It barked.';
 	let Img_Regex = /img src=\"([^\"]+)\"/;
 	let Match = ResponseBody.match(Img_Regex);
-	let Url = Match ? Match[1] : undefined;
-	if ( Url === undefined )
+	let ImgUrl = Match ? Match[1] : undefined;
+	if ( ImgUrl === undefined )
 		return null;
-	return Url;
+	return ImgUrl;
+}
+
+function GetGifByteArray(Image)
+{
+	var GifDataArray = [];
+		
+	//	make a gif!
+	var Gif = new GifEncoder(Image.Width,Image.Height);
+	Gif.colorTab = Image.Palette;
+	Gif.writeHeader();
+	Gif.writeLSD();
+	Gif.writePalette();
+		
+	//	setup for frame
+	//Gif.palSize = 0;
+	Gif.colorDepth = 8;
+	Gif.firstFrame = true;
+	Gif.indexedPixels = Image.Colours;
+	Gif.writeImageDesc();
+	Gif.writePixels();
+	Gif.finish();
+	
+	let writeByte = function(b)	{	GifDataArray.push(b);	};
+	let WritePage = function(Page,PageIndex)
+	{
+		let PageLength = (PageIndex == Gif.out.page) ? Gif.out.cursor : Page.length;
+		for ( let i=0;	i<PageLength;	i++ )
+			writeByte( Page[i] );
+	};
+	Gif.out.pages.forEach(WritePage);
+	
+	return GifDataArray;
+}
+
+async function ParsePngToImage(PngData)
+{
+	throw "todo";
+}
+
+async function DecodeImage(ImgUrl)
+{
+	let ImgResponse = await httpRequest( ImgUrl );
+	let ContentType = ImgResponse.headers['content-type'];
+	if ( ContentType != "image/png" )
+		throw "ContentType (" + ContentType + ") is not image/png"; 
+
+	return ParsePngToImage(ImgResponse.body);
+
+	let DebugImage = 
+	{
+		"Width":Debug_Width,
+		"Height":Debug_Height,
+		"Palette":Debug_Palette, 
+		"Colours":Debug_Colours 
+	};
+
+	return DebugImage;
 }
 
 exports.handler = async (event) => 
 {
 	try
 	{
-		let ImageUrl = await GetImageUrl('webcomicname.com','/tagged/oh-no/rss');
-		throw ImageUrl;
+		let ImageUrl = await GetFirstImgSrcUrl('http://webcomicname.com/tagged/oh-no/rss');
 		
-		var GifDataArray = [];
-		
-		//	make a gif!
-		var Gif = new GifEncoder(12,12);
-		Gif.colorTab = Palette;
-		Gif.writeHeader();
-		Gif.writeLSD();
-		Gif.writePalette();
-		
-		//	setup for frame
-		//Gif.palSize = 0;
-		Gif.colorDepth = 8;
-		Gif.firstFrame = true;
-		Gif.indexedPixels = Colours;
-		Gif.writeImageDesc();
-		Gif.writePixels();
-		Gif.finish();
+		let Image = await DecodeImage( ImageUrl );
 	
-		let writeByte = function(b)	{	GifDataArray.push(b);	};
-		let WritePage = function(Page,PageIndex)
-		{
-			let PageLength = (PageIndex == Gif.out.page) ? Gif.out.cursor : Page.length;
-			for ( let i=0;	i<PageLength;	i++ )
-				writeByte( Page[i] );
-		};
-		Gif.out.pages.forEach(WritePage);
-
-		//throw JSON.stringify( Gif.out );
-		//throw "ByteCount="+ ByteCount;
-		//throw "out.page=" + Gif.out.pages[0].cursor;	
-		//throw "length=" + GifDataArray.length;
-		
-		let GifBuffer = new Buffer( GifDataArray );
+		let GifByteArray = GetGifByteArray( Image );
+		let GifBuffer = new Buffer( GifByteArray);
 		let BinaryBase64 = GifBuffer.toString('base64');
-		//throw BinaryBase64;
 	
-		let ReturnBase64Image = true;
-		if ( ReturnBase64Image )
+		let ReturnDataUrl = true;
+		if ( ReturnDataUrl )
 		{
 			const response = 
 			{
 				statusCode: 200,
-				headers: {"content-type": "base64/gif"},
-				//	body: Gif.out,
-				body: BinaryBase64,
-				//contentHandling: "CONVERT_TO_BINARY"
+				body: "data:image/gif;base64," + BinaryBase64,
 			};
 			return response;
 		}
@@ -143,7 +180,7 @@ exports.handler = async (event) =>
 	{
 		const response = {
 			statusCode: 200,
-			body: "Error: " + (Error)
+			body: "Error: [" + (Error) + "]"
 		};
 		return response;
 	}
